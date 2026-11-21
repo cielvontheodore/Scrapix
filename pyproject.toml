@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "scrapix"
-version = "0.1.0"
+version = "0.2.0"
 description = "TUI downloader for YouTube, Instagram and TikTok (wraps yt-dlp and gallery-dl)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,6 +13,7 @@ dependencies = [
     "gallery-dl>=1.26",
     "questionary>=2.0",
     "rich>=13",
+    "flask>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +21,7 @@ dev = ["pytest"]
 
 [project.scripts]
 scrapix = "scrapix.cli:main"
+scrapix-web = "scrapix.web:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/scrapix"]

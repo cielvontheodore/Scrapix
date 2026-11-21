@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -92,6 +93,13 @@ def download_media(
     """Download video (kind="video") or MP3 audio (kind="audio")."""
     outdir.mkdir(parents=True, exist_ok=True)
     ffmpeg = has_ffmpeg()
+    if kind == "audio" and not ffmpeg:
+        raise DownloadFailed("Audio MP3 butuh ffmpeg. Arch/CachyOS: sudo pacman -S ffmpeg")
+
+    # Audio is extracted in a private temp folder. yt-dlp deletes the source file
+    # after extraction, and that source can share its name with a video the user
+    # already downloaded.
+    work = Path(tempfile.mkdtemp(prefix=".scrapix-", dir=outdir)) if kind == "audio" else outdir
 
     def hook(d: dict) -> None:
         if on_progress and d.get("status") == "downloading":
@@ -99,15 +107,13 @@ def download_media(
             on_progress(d.get("downloaded_bytes") or 0, total)
 
     opts: dict = {
-        "outtmpl": str(outdir / "%(title).150B [%(id)s].%(ext)s"),
+        "outtmpl": str(work / "%(title).150B [%(id)s].%(ext)s"),
         "noplaylist": True,
         "logger": _QuietLogger(),
         "noprogress": True,
         "progress_hooks": [hook],
     }
     if kind == "audio":
-        if not ffmpeg:
-            raise DownloadFailed("Audio MP3 butuh ffmpeg. Arch/CachyOS: sudo pacman -S ffmpeg")
         q = abr or AUDIO_BITRATES[0]
         opts["format"] = f"ba[abr<={q}]/ba/b"
         opts["postprocessors"] = [
@@ -119,13 +125,31 @@ def download_media(
             opts["merge_output_format"] = "mp4"
 
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-    except DownloadError as e:
-        raise DownloadFailed(str(e)) from e
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+        except DownloadError as e:
+            raise DownloadFailed(str(e)) from e
 
-    done = (info or {}).get("requested_downloads") or []
-    return Path(done[0]["filepath"]) if done and done[0].get("filepath") else None
+        done = (info or {}).get("requested_downloads") or []
+        path = Path(done[0]["filepath"]) if done and done[0].get("filepath") else None
+        if kind == "audio" and path is not None:
+            path = _move_unique(path, outdir)
+        return path
+    finally:
+        if work != outdir:
+            shutil.rmtree(work, ignore_errors=True)
+
+
+def _move_unique(src: Path, dest_dir: Path) -> Path:
+    """Move src into dest_dir without overwriting: name.mp3, name (1).mp3, ..."""
+    target = dest_dir / src.name
+    n = 1
+    while target.exists():
+        target = dest_dir / f"{src.stem} ({n}){src.suffix}"
+        n += 1
+    shutil.move(str(src), str(target))
+    return target
 
 
 def download_images(url: str, outdir: Path) -> int:
